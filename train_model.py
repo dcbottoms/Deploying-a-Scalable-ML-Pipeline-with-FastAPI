@@ -12,18 +12,16 @@ from ml.model import (
     save_model,
     train_model,
 )
-# TODO: load the cencus.csv data
-project_path = "Your path here"
-data_path = os.path.join(project_path, "data", "census.csv")
-print(data_path)
-data = None # your code here
 
-# TODO: split the provided data to have a train dataset and a test dataset
-# Optional enhancement, use K-fold cross validation instead of a train-test split.
-train, test = None, None# Your code here
 
-# DO NOT MODIFY
-cat_features = [
+PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = os.path.join(PROJECT_PATH, "data", "census.csv")
+MODEL_PATH = os.path.join(PROJECT_PATH, "model", "model.pkl")
+ENCODER_PATH = os.path.join(PROJECT_PATH, "model", "encoder.pkl")
+LB_PATH = os.path.join(PROJECT_PATH, "model", "lb.pkl")
+SLICE_OUTPUT_PATH = os.path.join(PROJECT_PATH, "slice_output.txt")
+
+CAT_FEATURES = [
     "workclass",
     "education",
     "marital-status",
@@ -34,54 +32,78 @@ cat_features = [
     "native-country",
 ]
 
-# TODO: use the process_data function provided to process the data.
-X_train, y_train, encoder, lb = process_data(
-    # your code here
-    # use the train dataset 
-    # use training=True
-    # do not need to pass encoder and lb as input
+
+def main():
+    """Train model, save artifacts, and calculate slice performance."""
+    data = pd.read_csv(DATA_PATH)
+
+    data = data.apply(
+        lambda x: x.str.strip() if x.dtype == "object" else x
     )
 
-X_test, y_test, _, _ = process_data(
-    test,
-    categorical_features=cat_features,
-    label="salary",
-    training=False,
-    encoder=encoder,
-    lb=lb,
-)
+    train, test = train_test_split(
+        data,
+        test_size=0.20,
+        random_state=42,
+    )
 
-# TODO: use the train_model function to train the model on the training dataset
-model = None # your code here
+    X_train, y_train, encoder, lb = process_data(
+        train,
+        categorical_features=CAT_FEATURES,
+        label="salary",
+        training=True,
+    )
 
-# save the model and the encoder
-model_path = os.path.join(project_path, "model", "model.pkl")
-save_model(model, model_path)
-encoder_path = os.path.join(project_path, "model", "encoder.pkl")
-save_model(encoder, encoder_path)
+    X_test, y_test, _, _ = process_data(
+        test,
+        categorical_features=CAT_FEATURES,
+        label="salary",
+        training=False,
+        encoder=encoder,
+        lb=lb,
+    )
 
-# load the model
-model = load_model(
-    model_path
-) 
+    model = train_model(X_train, y_train)
 
-# TODO: use the inference function to run the model inferences on the test dataset.
-preds = None # your code here
+    save_model(model, MODEL_PATH)
+    save_model(encoder, ENCODER_PATH)
+    save_model(lb, LB_PATH)
 
-# Calculate and print the metrics
-p, r, fb = compute_model_metrics(y_test, preds)
-print(f"Precision: {p:.4f} | Recall: {r:.4f} | F1: {fb:.4f}")
+    model = load_model(MODEL_PATH)
+    preds = inference(model, X_test)
 
-# TODO: compute the performance on model slices using the performance_on_categorical_slice function
-# iterate through the categorical features
-for col in cat_features:
-    # iterate through the unique values in one categorical feature
-    for slicevalue in sorted(test[col].unique()):
-        count = test[test[col] == slicevalue].shape[0]
-        p, r, fb = performance_on_categorical_slice(
-            # your code here
-            # use test, col and slicevalue as part of the input
-        )
-        with open("slice_output.txt", "a") as f:
-            print(f"{col}: {slicevalue}, Count: {count:,}", file=f)
-            print(f"Precision: {p:.4f} | Recall: {r:.4f} | F1: {fb:.4f}", file=f)
+    precision, recall, fbeta = compute_model_metrics(y_test, preds)
+
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"F1: {fbeta:.4f}")
+
+    with open(SLICE_OUTPUT_PATH, "w") as file:
+        file.write("Overall model performance\n")
+        file.write(f"Precision: {precision:.4f}\n")
+        file.write(f"Recall: {recall:.4f}\n")
+        file.write(f"F1: {fbeta:.4f}\n\n")
+
+        for column in CAT_FEATURES:
+            for slice_value in sorted(test[column].unique()):
+                slice_precision, slice_recall, slice_fbeta = (
+                    performance_on_categorical_slice(
+                        test,
+                        column,
+                        slice_value,
+                        CAT_FEATURES,
+                        "salary",
+                        encoder,
+                        lb,
+                        model,
+                    )
+                )
+
+                file.write(f"{column}: {slice_value}\n")
+                file.write(f"Precision: {slice_precision:.4f}\n")
+                file.write(f"Recall: {slice_recall:.4f}\n")
+                file.write(f"F1: {slice_fbeta:.4f}\n\n")
+
+
+if __name__ == "__main__":
+    main()
